@@ -2,8 +2,6 @@ package io.github.neobliz1.kafka.raft.scram.demo;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
@@ -11,9 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -35,26 +33,12 @@ class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
     @Test
     void verifyAtLeastOnceDeliveryWithLatencyToxic() throws Exception {
         String warmupStationId = "warmup-"+UUID.randomUUID();
-        WeatherPacket warmupPacket = WeatherPacket.newBuilder()
-                .setStationId(warmupStationId)
-                .setTimestamp(System.currentTimeMillis())
-                .build();
-
         String testStationId = "delivery-test-"+UUID.randomUUID();
-        long testTimestamp = System.currentTimeMillis();
-        WeatherPacket testPacket = WeatherPacket.newBuilder()
-                .setStationId(testStationId)
-                .setTimestamp(testTimestamp)
-                .build();
-
         List<WeatherPacket> allReceived = new CopyOnWriteArrayList<>();
 
         // STEP 1: Establish connection with warmup message
         log.info("STEP 1: Sending warmup message to establish connection...");
-        mockMvc.perform(post(API_V_1_WEATHER)
-                        .contentType(MediaType.APPLICATION_PROTOBUF_VALUE)
-                        .content(warmupPacket.toByteArray()))
-                .andExpect(status().is2xxSuccessful());
+        sendWeatherPacket(warmupStationId, Instant.now().toEpochMilli());
 
         Thread.sleep(2000);
 
@@ -71,10 +55,8 @@ class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
         log.info("STEP 3: Sending test message with delayed ACK...");
         CompletableFuture<Void> sendFuture = CompletableFuture.runAsync(() -> {
             try {
-                mockMvc.perform(post(API_V_1_WEATHER)
-                                .contentType(MediaType.APPLICATION_PROTOBUF_VALUE)
-                                .content(testPacket.toByteArray()))
-                        .andExpect(status().is2xxSuccessful());
+                sendWeatherPacket(testStationId, Instant.now().toEpochMilli());
+
                 log.info("Test message send completed");
             } catch(Exception e) {
                 log.error("Send failed", e);
@@ -99,7 +81,7 @@ class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
             for(int i = 0; i<20; i++) {
                 ConsumerRecords<String, WeatherPacket> records = consumer.poll(Duration.ofSeconds(2));
                 records.forEach(record -> {
-                    if(record.value().getStationId().equals(testStationId)) {
+                    if(record.value().getStationId().equals(getStationId(testStationId))) {
                         allReceived.add(record.value());
                         log.info("Received test message at offset: {}, timestamp: {}",
                                 record.offset(), record.value().getTimestamp());

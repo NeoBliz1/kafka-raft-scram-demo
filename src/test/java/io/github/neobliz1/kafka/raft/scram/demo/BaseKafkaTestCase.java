@@ -1,6 +1,8 @@
 package io.github.neobliz1.kafka.raft.scram.demo;
 
 import static org.awaitility.Awaitility.await;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
@@ -11,12 +13,14 @@ import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -98,6 +102,29 @@ public abstract class BaseKafkaTestCase {
         consumer.subscribe(Collections.singleton(topicName));
         consumer.poll(Duration.ofMillis(500));
         consumer.commitSync();
+    }
+
+    @NotNull
+    public static String getStationId(String batchId) {
+        return "station-"+batchId;
+    }
+
+    public void sendWeatherPacket(String batchId, long index) throws Exception {
+        long start = System.currentTimeMillis();
+        WeatherPacket packet = WeatherPacket.newBuilder()
+                .setStationId(getStationId(batchId))
+                .setTimestamp(index)
+                .build();
+        long buildTime = System.currentTimeMillis()-start;
+
+        long beforeSend = System.currentTimeMillis();
+        mockMvc.perform(post(API_V_1_WEATHER)
+                        .contentType(MediaType.APPLICATION_PROTOBUF)
+                        .content(packet.toByteArray()))
+                .andExpect(status().is2xxSuccessful());
+        long sendTime = System.currentTimeMillis()-beforeSend;
+
+        log.info("Message {}: build={}ms, send={}ms", index, buildTime, sendTime);
     }
 
     @AfterEach

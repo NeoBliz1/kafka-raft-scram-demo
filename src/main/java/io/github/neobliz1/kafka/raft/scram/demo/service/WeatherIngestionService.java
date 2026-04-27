@@ -18,16 +18,6 @@ public class WeatherIngestionService {
     private final WeatherIngestionProducer weatherIngestionProducer;
 
     /**
-     * Saves a failed weather packet to the dead letter queue.
-     *
-     * @param packet The weather packet to save.
-     */
-    private void deadLetterQueueSave(WeatherPacket packet) {
-        log.warn("STATION_FAILURE_RECOVERY: Saving failed packet for station {} to fallback storage",
-                packet.getStationId());
-    }
-
-    /**
      * Sends a weather packet to the ingestion producer.
      *
      * @param weatherPacket The weather packet to send.
@@ -38,7 +28,7 @@ public class WeatherIngestionService {
         } catch(RuntimeException e) {
             // This catch block IS your recovery logic now
             log.error("All retries exhausted for station: {}", weatherPacket.getStationId());
-            deadLetterQueueSave(weatherPacket);
+            weatherIngestionProducer.deadLetterQueueSave(weatherPacket);
         }
     }
 }
