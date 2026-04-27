@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="SimulateSensorsPlan">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Thread Group">
+        <intProp name="ThreadGroup.num_threads">30</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <longProp name="ThreadGroup.duration">1</longProp>
+        <longProp name="ThreadGroup.delay">2</longProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller">
+          <intProp name="LoopController.loops">-1</intProp>
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="JSR223 Sampler">
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="parameters"></stringProp>
+          <stringProp name="script">// JSR223 Sampler Script (Language: groovy)
+
+import com.eco.ingestion.proto.*
+import java.time.Instant
+import java.util.Random
+
+// --- Data Simulation Setup ---
+def random = new Random()
+def stationIds = [&quot;NYC-STATION-001&quot;, &quot;LA-STATION-007&quot;, &quot;CHI-STATION-003&quot;, &quot;MIA-STATION-002&quot;]
+
+// --- 1. Build the Protobuf object with DYNAMIC data ---
+
+// Select a random station ID
+def stationId = stationIds[random.nextInt(stationIds.size())]
+
+// Generate a current timestamp as a simple &apos;long&apos; (epoch seconds)
+def now = Instant.now()
+def epochSeconds = now.getEpochSecond()
+
+// Generate random location data. These setters expect &apos;double&apos;, so this is correct.
+def location = Location.newBuilder()
+        .setLatitude(40.7128 + (random.nextDouble() - 0.5))
+        .setLongitude(-74.0060 + (random.nextDouble() - 0.5))
+        .setAltitude(random.nextDouble() * 100.0) // Use nextDouble for consistency
+        .build()
+
+// Create a list to hold our sensor readings for this packet
+def sensorReadings = []
+
+// --- Simulate different sensor readings randomly ---
+
+// Add an Ambient Reading (always)
+// CORRECTED: Explicitly cast the final result to (float)
+def ambientReading = AmbientReading.newBuilder()
+        .setTemperatureC((float) (15.0f + random.nextFloat() * 15.0f))
+        .setHumidityPct((float) (40.0f + random.nextFloat() * 50.0f))
+        .setPressureHpa((float) (990.0f + random.nextFloat() * 40.0f))
+        .build()
+sensorReadings.add(SensorReading.newBuilder().setAmbient(ambientReading).build())
+
+// Add a Wind Reading (90% of the time)
+// CORRECTED: Explicitly cast the final result to (float)
+if (random.nextFloat() &lt; 0.9f) {
+    def windReading = WindReading.newBuilder()
+            .setSpeedMps((float) (random.nextFloat() * 15.0f))
+            .setDirectionDeg(random.nextInt(360)) // This is an int32, which is correct
+            .setGustMps((float) (random.nextFloat() * 25.0f))
+            .build()
+    sensorReadings.add(SensorReading.newBuilder().setWind(windReading).build())
+}
+
+// Add an Air Quality Reading (30% of the time)
+// CORRECTED: Explicitly cast the final result to (float)
+if (random.nextFloat() &lt; 0.3f) {
+    // Note: your .proto file has pm2_5, which becomes setPm25 in Java
+    def airQualityReading = AirQualityReading.newBuilder()
+            .setPm25((float) (random.nextFloat() * 50.0f))
+            .setVocIndex((float) (random.nextFloat() * 500.0f))
+            .build()
+    sensorReadings.add(SensorReading.newBuilder().setAirQuality(airQualityReading).build())
+}
+
+
+// --- Assemble the final WeatherPacket ---
+def weatherPacketBuilder = WeatherPacket.newBuilder()
+        .setStationId(stationId)
+        .setTimestamp(epochSeconds)
+        .setLocation(location)
+
+// Add all the generated readings to the packet
+sensorReadings.forEach { reading -&gt; weatherPacketBuilder.addReadings(reading) }
+
+def weatherPacket = weatherPacketBuilder.build()
+
+// --- 2. Serialize and Send the Request ---
+byte[] protoBytes = weatherPacket.toByteArray()
+
+def url = new URL(&quot;http://localhost:8081/api/v1/weather&quot;)
+def connection = (HttpURLConnection) url.openConnection()
+connection.setRequestMethod(&quot;POST&quot;)
+connection.setRequestProperty(&quot;Content-Type&quot;, &quot;application/x-protobuf&quot;)
+connection.setDoOutput(true)
+
+// Write the binary payload to the request body
+connection.getOutputStream().write(protoBytes)
+
+// --- 3. Set JMeter sample result based on the HTTP response ---
+SampleResult.setResponseCode(String.valueOf(connection.getResponseCode()))
+SampleResult.setResponseMessage(connection.getResponseMessage())
+SampleResult.setSuccessful(connection.getResponseCode() == 200)
+SampleResult.setRequestHeaders(connection.getRequestProperties().collect { k, v -&gt; &quot;$k: $v&quot; }.join(&apos;\n&apos;))
+SampleResult.setSentBytes(protoBytes.length)
+
+// Clean up
+connection.disconnect()</stringProp>
+          <stringProp name="scriptLanguage">groovy</stringProp>
+        </JSR223Sampler>
+        <hashTree>
+          <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer" testname="Constant Timer">
+            <stringProp name="ConstantTimer.delay">30000</stringProp>
+          </ConstantTimer>
+          <hashTree/>
+        </hashTree>
+        <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="View Results Tree">
+          <boolProp name="ResultCollector.error_logging">false</boolProp>
+          <objProp>
+            <name>saveConfig</name>
+            <value class="SampleSaveConfiguration">
+              <time>true</time>
+              <latency>true</latency>
+              <timestamp>true</timestamp>
+              <success>true</success>
+              <label>true</label>
+              <code>true</code>
+              <message>true</message>
+              <threadName>true</threadName>
+              <dataType>true</dataType>
+              <encoding>false</encoding>
+              <assertions>true</assertions>
+              <subresults>true</subresults>
+              <responseData>false</responseData>
+              <samplerData>false</samplerData>
+              <xml>false</xml>
+              <fieldNames>true</fieldNames>
+              <responseHeaders>false</responseHeaders>
+              <requestHeaders>false</requestHeaders>
+              <responseDataOnError>false</responseDataOnError>
+              <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+              <assertionsResultsToSave>0</assertionsResultsToSave>
+              <bytes>true</bytes>
+              <sentBytes>true</sentBytes>
+              <url>true</url>
+              <threadCounts>true</threadCounts>
+              <idleTime>true</idleTime>
+              <connectTime>true</connectTime>
+            </value>
+          </objProp>
+          <stringProp name="filename"></stringProp>
+        </ResultCollector>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

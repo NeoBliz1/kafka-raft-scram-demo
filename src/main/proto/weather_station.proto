@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package io.github.neobliz1.kafka.raft.scram.demo.proto;
+
+option java_package = "io.github.neobliz1.kafka.raft.scram.demo.proto";
+option java_multiple_files = true;
+
+message WeatherPacket {
+  string station_id = 1;      // ID 1 to 30
+  int64 timestamp = 2;        // Java 21: Instant.now().toEpochMilli()
+  Location location = 3;
+  repeated SensorReading readings = 4; // Batch multiple sensors in one request
+}
+
+message Location {
+  double latitude = 1;
+  double longitude = 2;
+  double altitude = 3;
+}
+
+message SensorReading {
+  oneof sensor_data {
+    WindReading wind = 1;
+    AmbientReading ambient = 2;
+    AirQualityReading air_quality = 3;
+    PrecipitationReading precipitation = 4;
+    OpticalReading optical = 5;
+  }
+}
+
+// --- Specific Data Groups ---
+
+message WindReading {
+  float speed_mps = 1;        // Meters per second
+  int32 direction_deg = 2;    // 0-360
+  float gust_mps = 3;
+}
+
+message AmbientReading {
+  float temperature_c = 1;
+  float humidity_pct = 2;
+  float pressure_hpa = 3;     // Barometer
+  float leaf_wetness_pct = 4;
+}
+
+message AirQualityReading {
+  float pm100 = 1;            // µg/m³
+  float pm2_5 = 2;
+  float pm10 = 3;
+  float voc_index = 4;        // Volatile Organic Compounds
+  float noise_db = 5;         // Decibels
+}
+
+message PrecipitationReading {
+  float rain_rate_mm_h = 1;   // Rain Gauge
+  float snow_depth_cm = 2;
+  float evaporation_rate = 3;
+}
+
+message OpticalReading {
+  float uv_index = 1;
+  float solar_radiation_wm2 = 2; // Pyranometer
+  float lux = 3;                 // Illuminance
+  float visibility_m = 4;        // Visibility sensor
+}

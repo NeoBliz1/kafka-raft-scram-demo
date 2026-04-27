@@ -1,0 +1,129 @@
+package io.github.neobliz1.kafka.raft.scram.demo;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import eu.rekawek.toxiproxy.model.ToxicDirection;
+import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+
+@Slf4j
+@SpringBootTest(properties = {
+        "spring.kafka.producer.acks=all",
+        "spring.kafka.producer.retries=10",
+        "spring.kafka.producer.properties.enable.idempotence=false",
+        "spring.kafka.producer.properties.request.timeout.ms=5000",
+        "spring.kafka.producer.properties.delivery.timeout.ms=60000",
+        "spring.kafka.producer.properties.retry.backoff.ms=1000",
+        "spring.kafka.producer.properties.max.in.flight.requests.per.connection=5",
+})
+class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
+
+    @Test
+    void verifyAtLeastOnceDeliveryWithLatencyToxic() throws Exception {
+        String warmupStationId = "warmup-"+UUID.randomUUID();
+        WeatherPacket warmupPacket = WeatherPacket.newBuilder()
+                .setStationId(warmupStationId)
+                .setTimestamp(System.currentTimeMillis())
+                .build();
+
+        String testStationId = "delivery-test-"+UUID.randomUUID();
+        long testTimestamp = System.currentTimeMillis();
+        WeatherPacket testPacket = WeatherPacket.newBuilder()
+                .setStationId(testStationId)
+                .setTimestamp(testTimestamp)
+                .build();
+
+        List<WeatherPacket> allReceived = new CopyOnWriteArrayList<>();
+
+        // STEP 1: Establish connection with warmup message
+        log.info("STEP 1: Sending warmup message to establish connection...");
+        mockMvc.perform(post(API_V_1_WEATHER)
+                        .contentType(MediaType.APPLICATION_PROTOBUF_VALUE)
+                        .content(warmupPacket.toByteArray()))
+                .andExpect(status().is2xxSuccessful());
+
+        Thread.sleep(2000);
+
+        // STEP 2: Add LATENCY toxic with delay > request.timeout.ms
+        // request.timeout.ms = 5000, so use 8000ms delay
+        log.info("STEP 2: Adding LATENCY toxic (8 second delay)...");
+        KAFKA_PROXY.toxics()
+                .latency("kafka_latency", ToxicDirection.UPSTREAM, 8000)
+                .setJitter(1000);
+
+        Thread.sleep(1000);
+
+        // STEP 3: Send test message - should timeout and retry
+        log.info("STEP 3: Sending test message with delayed ACK...");
+        CompletableFuture<Void> sendFuture = CompletableFuture.runAsync(() -> {
+            try {
+                mockMvc.perform(post(API_V_1_WEATHER)
+                                .contentType(MediaType.APPLICATION_PROTOBUF_VALUE)
+                                .content(testPacket.toByteArray()))
+                        .andExpect(status().is2xxSuccessful());
+                log.info("Test message send completed");
+            } catch(Exception e) {
+                log.error("Send failed", e);
+                throw new RuntimeException(e);
+            }
+        });
+
+        // Wait longer for retries (10 retries * 1s backoff = ~10s, plus delays)
+        log.info("Waiting for producer retries...");
+        Thread.sleep(25000);
+
+        // STEP 4: Remove latency toxic
+        log.info("STEP 4: Removing latency toxic...");
+        KAFKA_PROXY.toxics().get("kafka_latency").remove();
+
+        Thread.sleep(5000);
+        sendFuture.get(30, TimeUnit.SECONDS);
+
+        // STEP 5: Verify duplicates
+        await().atMost(90, TimeUnit.SECONDS).pollInterval(1, TimeUnit.SECONDS).untilAsserted(() -> {
+            // Poll multiple times
+            for(int i = 0; i<20; i++) {
+                ConsumerRecords<String, WeatherPacket> records = consumer.poll(Duration.ofSeconds(2));
+                records.forEach(record -> {
+                    if(record.value().getStationId().equals(testStationId)) {
+                        allReceived.add(record.value());
+                        log.info("Received test message at offset: {}, timestamp: {}",
+                                record.offset(), record.value().getTimestamp());
+                    }
+                });
+                Thread.sleep(500);
+            }
+
+            log.info("Total test messages received: {}", allReceived.size());
+
+            // Verify we have duplicates
+            assertThat(allReceived.size())
+                    .withFailMessage("Expected duplicates (2+ messages) but got %d", allReceived.size())
+                    .isGreaterThan(1);
+
+            // Verify all messages are identical (proves it's retry-induced duplicates)
+            WeatherPacket first = allReceived.getFirst();
+            assertThat(allReceived)
+                    .withFailMessage("Not all messages are identical - they should be duplicates from producer retries")
+                    .allMatch(msg -> msg.getStationId().equals(first.getStationId()) &&
+                            msg.getTimestamp()==first.getTimestamp());
+
+            log.info("✅ SUCCESS: Detected {} IDENTICAL messages, proving at-least-once delivery with duplicates!",
+                    allReceived.size());
+        });
+    }
+}
