@@ -1,0 +1,37 @@
+package io.github.neobliz1.kafka.raft.scram.demo.controller;
+
+import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
+import io.github.neobliz1.kafka.raft.scram.demo.service.WeatherIngestionService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Controller for ingesting weather data.
+ */
+@Slf4j
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1/weather")
+public class WeatherIngestionController {
+
+    private final WeatherIngestionService weatherIngestionService;
+
+    /**
+     * Ingests a weather packet.
+     *
+     * @param weatherPacket The weather packet to ingest.
+     * @return A response entity with the status of the ingestion.
+     */
+    @PostMapping(consumes = MediaType.APPLICATION_PROTOBUF_VALUE)
+    public ResponseEntity<Void> ingest(@RequestBody WeatherPacket weatherPacket) {
+        log.info("Received weather data: {}", weatherPacket);
+        weatherIngestionService.sendWeatherPacket(weatherPacket);
+        return ResponseEntity.accepted().build();
+    }
+}

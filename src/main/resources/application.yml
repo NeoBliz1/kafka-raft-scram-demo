@@ -1,0 +1,38 @@
+spring:
+  threads:
+    virtual:
+      enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      acks: all
+      retries: 10
+      properties:
+        enable.idempotence: true
+        schema.registry.url: http://localhost:8085
+        linger.ms: 20
+        batch.size: 65536
+        compression.type: snappy
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 60000
+        retry.backoff.ms: 1000
+        max.in.flight.requests.per.connection: 5
+    consumer:
+      properties:
+        security.protocol: PLAINTEXT
+
+# Custom application properties
+app:
+  kafka:
+    topic:
+      name: WeatherPacketReceived
+
+server:
+  port: 8081
+
+logging:
+  level:
+    root: INFO
+    com.eco.ingestion: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %magenta(%-40.40logger{39}) : %msg%n"
