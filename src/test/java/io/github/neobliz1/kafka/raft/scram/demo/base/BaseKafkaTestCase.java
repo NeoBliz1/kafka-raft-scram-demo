@@ -1,10 +1,11 @@
-package io.github.neobliz1.kafka.raft.scram.demo;
+package io.github.neobliz1.kafka.raft.scram.demo.base;
 
 import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -12,7 +13,11 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,13 +48,13 @@ public abstract class BaseKafkaTestCase {
     public static final int KAFKA_PORT = 9092;
     public static final String SCHEMA_REGISTRY = "schema-registry";
     public static final int SCHEMA_REGISTRY_PORT = 8081;
+    protected Consumer<String, WeatherPacket> consumer;
 
     @Autowired
     protected MockMvc mockMvc;
 
     @Value("${app.kafka.topic.name}")
     protected String topicName;
-    protected Consumer<String, WeatherPacket> consumer;
 
     protected abstract String getBootstrapServers();
 
@@ -88,20 +93,40 @@ public abstract class BaseKafkaTestCase {
             } catch(Exception ignored) {
             }
         }
+        consumer = createConsumer(null);
+        consumer.subscribe(Collections.singleton(topicName));
+        consumer.poll(Duration.ofMillis(500));
+        consumer.commitSync();
+    }
+
+    protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) {
         Map<String, Object> consumerProps = new HashMap<>();
-        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-"+UUID.randomUUID());
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaProtobufDeserializer.class);
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
-        consumerProps.put("schema.registry.url", registryUrl);
+        consumerProps.put("schema.registry.url", getSchemaRegistryUrl());
         consumerProps.put("specific.protobuf.value.type", WeatherPacket.class.getName());
-        consumer = new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
-        consumer.subscribe(Collections.singleton(topicName));
-        consumer.poll(Duration.ofMillis(500));
-        consumer.commitSync();
+        if(isolationLevel!=null && !isolationLevel.isBlank()) {
+            consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
+        }
+        return new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
+    }
+
+    protected Producer<String, WeatherPacket> createTransactionalProducer() {
+        Map<String, Object> producerProps = new HashMap<>();
+        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
+        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
+        producerProps.put("schema.registry.url", getSchemaRegistryUrl());
+        producerProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "tx-"+UUID.randomUUID());
+        producerProps.put(ProducerConfig.ACKS_CONFIG, "all");
+        producerProps.put(ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE);
+        return new KafkaProducer<>(producerProps);
     }
 
     @NotNull

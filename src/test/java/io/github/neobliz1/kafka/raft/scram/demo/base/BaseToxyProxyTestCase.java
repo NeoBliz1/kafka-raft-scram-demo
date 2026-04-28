@@ -1,4 +1,4 @@
-package io.github.neobliz1.kafka.raft.scram.demo;
+package io.github.neobliz1.kafka.raft.scram.demo.base;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.awaitility.Awaitility.await;

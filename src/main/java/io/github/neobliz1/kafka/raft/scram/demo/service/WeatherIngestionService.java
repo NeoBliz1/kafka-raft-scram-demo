@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.CompletableFuture;
+
 /**
  * Service for ingesting weather data.
  */
@@ -23,12 +25,20 @@ public class WeatherIngestionService {
      * @param weatherPacket The weather packet to send.
      */
     public void sendWeatherPacket(WeatherPacket weatherPacket) {
-        try {
-            weatherIngestionProducer.send(weatherPacket);
-        } catch(RuntimeException e) {
-            // This catch block IS your recovery logic now
-            log.error("All retries exhausted for station: {}", weatherPacket.getStationId());
-            weatherIngestionProducer.deadLetterQueueSave(weatherPacket);
-        }
+        CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        return weatherIngestionProducer.sendTransactional(weatherPacket);
+                    } catch(Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+        ).whenComplete((metadata, ex) -> {
+            if(ex==null) log.info("Offset: {}", metadata.offset());
+            else {
+                log.error("Failed to ingest station {}: {}", weatherPacket.getStationId(), ex.getCause().getMessage());
+                weatherIngestionProducer.deadLetterQueueSave(weatherPacket);
+            }
+        });
     }
 }

@@ -5,17 +5,20 @@ import io.github.neobliz1.kafka.raft.scram.demo.producer.WeatherIngestionProduce
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.event.EventListener;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.resilience.retry.MethodRetryEvent;
 
+import java.net.InetAddress;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Configuration class for Kafka producer.
@@ -26,16 +29,42 @@ public class KafkaProducerConfig {
 
     private final KafkaProperties kafkaProperties;
 
+    @Value("${spring.kafka.producer.custom-transaction-id-prefix}")
+    private String customKafkaTransactionPrefix;
+
+    @Value("${app.kafka.topic.name}")
+    private String topicName;
+
     /**
      * Creates a Kafka producer factory.
      *
      * @return The Kafka producer factory.
      */
     @Bean
+    @Profile("!test-transactions-off")
+    public ProducerFactory<String, WeatherPacket> producerFactoryWithKafkaTransactions() {
+        Map<String, Object> props = kafkaProperties.buildProducerProperties();
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
+        DefaultKafkaProducerFactory<String, WeatherPacket> producerFactory = new DefaultKafkaProducerFactory<>(props);
+        String resolvedHostname;
+        try {
+            resolvedHostname = InetAddress.getLocalHost().getHostName();
+        } catch(java.net.UnknownHostException e) {
+            resolvedHostname = "unknown-host";
+        }
+        String transactionIdPrefix = customKafkaTransactionPrefix+resolvedHostname+"-";
+        producerFactory.setTransactionIdPrefix(transactionIdPrefix);
+        return producerFactory;
+    }
+
+    @Bean
+    @Profile("test-transactions-off")
     public ProducerFactory<String, WeatherPacket> producerFactory() {
         Map<String, Object> props = kafkaProperties.buildProducerProperties();
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
+
         return new DefaultKafkaProducerFactory<>(props);
     }
 
@@ -45,8 +74,8 @@ public class KafkaProducerConfig {
      * @return The Kafka template.
      */
     @Bean
-    public KafkaTemplate<String, WeatherPacket> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+    public KafkaTemplate<String, WeatherPacket> kafkaTemplate(ProducerFactory<String, WeatherPacket> producerFactory) {
+        return new KafkaTemplate<>(producerFactory);
     }
 
     /**
@@ -56,24 +85,22 @@ public class KafkaProducerConfig {
      * @return The weather ingestion producer.
      */
     @Bean
-    public WeatherIngestionProducer weatherStationProducer(KafkaTemplate<String, WeatherPacket> kafkaTemplate) {
+    @Profile("!test-transactions-off")
+    public WeatherIngestionProducer weatherStationProducerWithKafkaTransaction(KafkaTemplate<String, WeatherPacket> kafkaTemplate) {
         return new WeatherIngestionProducer(kafkaTemplate);
     }
 
-    /**
-     * Handles retry events.
-     *
-     * @param event The method retry event.
-     */
-    @EventListener
-    public void onRetry(MethodRetryEvent event) {
-        // This triggers for EVERY failed attempt
-        System.out.println("Retry attempt detected for method: "+event.getMethod().getName());
-        System.out.println("Exception: "+event.getFailure().getMessage());
-
-        // You can check if the retry was eventually aborted (failed all attempts)
-        if(event.isRetryAborted()) {
-            System.err.println("Retry exhausted! No more attempts.");
-        }
+    @Bean
+    @Profile("test-transactions-off")
+    public WeatherIngestionProducer weatherStationProducer(KafkaTemplate<String, WeatherPacket> kafkaTemplate) {
+        return new WeatherIngestionProducer(kafkaTemplate) {
+            @Override
+            public RecordMetadata sendTransactional(WeatherPacket weatherPacket)
+                    throws ExecutionException, InterruptedException {
+                return kafkaTemplate.send(topicName, weatherPacket.getStationId(), weatherPacket)
+                        .get()
+                        .getRecordMetadata();
+            }
+        };
     }
 }

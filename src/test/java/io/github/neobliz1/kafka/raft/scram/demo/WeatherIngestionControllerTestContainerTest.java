@@ -4,11 +4,13 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.testcontainers.shaded.org.awaitility.Awaitility.await;
 
+import io.github.neobliz1.kafka.raft.scram.demo.base.BaseKafkaTestCase;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.ComposeContainer;
@@ -24,6 +26,7 @@ import java.util.UUID;
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles({ "test-transactions-off", "test" })
 class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
 
     protected static String BOOTSTRAP_SERVERS_URL;

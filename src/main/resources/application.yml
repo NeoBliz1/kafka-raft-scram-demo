@@ -7,6 +7,7 @@ spring:
     producer:
       acks: all
       retries: 10
+      custom-transaction-id-prefix: "ingestion-service-"
       properties:
         enable.idempotence: true
         schema.registry.url: http://localhost:8085

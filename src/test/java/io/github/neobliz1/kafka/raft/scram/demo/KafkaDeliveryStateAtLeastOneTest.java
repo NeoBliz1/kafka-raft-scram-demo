@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import io.github.neobliz1.kafka.raft.scram.demo.base.BaseToxyProxyTestCase;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -19,14 +21,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
+@ActiveProfiles({ "test-transactions-off", "test" })
 @SpringBootTest(properties = {
         "spring.kafka.producer.acks=all",
         "spring.kafka.producer.retries=10",
         "spring.kafka.producer.properties.enable.idempotence=false",
-        "spring.kafka.producer.properties.request.timeout.ms=5000",
-        "spring.kafka.producer.properties.delivery.timeout.ms=60000",
-        "spring.kafka.producer.properties.retry.backoff.ms=1000",
-        "spring.kafka.producer.properties.max.in.flight.requests.per.connection=5",
+        "spring.kafka.producer.properties.request.timeout.ms=3000",
+        "spring.kafka.producer.properties.delivery.timeout.ms=30000",
+        "spring.kafka.producer.properties.retry.backoff.ms=500",
 })
 class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
 
