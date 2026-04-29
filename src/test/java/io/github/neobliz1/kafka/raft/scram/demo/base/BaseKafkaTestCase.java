@@ -5,20 +5,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
+import io.github.neobliz1.kafka.raft.scram.demo.repository.OutboxRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.Producer;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +24,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
@@ -37,9 +38,15 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Base test class for Kafka-related integration tests.
+ * This class provides common setup and teardown operations for Kafka,
+ * including topic management, consumer creation, and test utilities.
+ */
 @Slf4j
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 @TestPropertySource(locations = "classpath:application.yml")
 public abstract class BaseKafkaTestCase {
 
@@ -48,10 +55,17 @@ public abstract class BaseKafkaTestCase {
     public static final int KAFKA_PORT = 9092;
     public static final String SCHEMA_REGISTRY = "schema-registry";
     public static final int SCHEMA_REGISTRY_PORT = 8081;
+    /**
+     * Kafka consumer for testing purposes.
+     * This consumer is initialized in {@link #setUp()} and closed in {@link #tearDown()}.
+     */
     protected Consumer<String, WeatherPacket> consumer;
 
     @Autowired
     protected MockMvc mockMvc;
+
+    @Autowired
+    protected OutboxRepository outboxRepository;
 
     @Value("${app.kafka.topic.name}")
     protected String topicName;
@@ -60,16 +74,15 @@ public abstract class BaseKafkaTestCase {
 
     protected abstract String getSchemaRegistryUrl();
 
-    @BeforeEach
-    void setUp() throws Exception {
-        String bootstrap = getBootstrapServers();
-        await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> {
-            try(var admin = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap))) {
-                admin.listTopics().names().get(10, TimeUnit.SECONDS);
-            }
-        });
-        cleanupAndCreateTopic(bootstrap);
-        setupConsumer(bootstrap, getSchemaRegistryUrl());
+    @AfterAll
+    static void cleanup() {
+        try {
+            Files.deleteIfExists(Path.of("./data/weatherdb.mv.db"));
+            Files.deleteIfExists(Path.of("./data/weatherdb.trace.db"));
+            Files.deleteIfExists(Path.of("./data"));
+        } catch(IOException e) {
+            log.warn("Failed to clean up H2 database files", e);
+        }
     }
 
     private void cleanupAndCreateTopic(String bootstrap) throws Exception {
@@ -99,34 +112,17 @@ public abstract class BaseKafkaTestCase {
         consumer.commitSync();
     }
 
-    protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) {
-        Map<String, Object> consumerProps = new HashMap<>();
-        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
-        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-"+UUID.randomUUID());
-        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaProtobufDeserializer.class);
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
-        consumerProps.put("schema.registry.url", getSchemaRegistryUrl());
-        consumerProps.put("specific.protobuf.value.type", WeatherPacket.class.getName());
-        if(isolationLevel!=null && !isolationLevel.isBlank()) {
-            consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
-        }
-        return new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
-    }
-
-    protected Producer<String, WeatherPacket> createTransactionalProducer() {
-        Map<String, Object> producerProps = new HashMap<>();
-        producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
-        producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
-        producerProps.put("schema.registry.url", getSchemaRegistryUrl());
-        producerProps.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-        producerProps.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "tx-"+UUID.randomUUID());
-        producerProps.put(ProducerConfig.ACKS_CONFIG, "all");
-        producerProps.put(ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE);
-        return new KafkaProducer<>(producerProps);
+    @BeforeEach
+    void setUp() throws Exception {
+        String bootstrap = getBootstrapServers();
+        await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> {
+            try(var admin = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap))) {
+                admin.listTopics().names().get(10, TimeUnit.SECONDS);
+            }
+        });
+        cleanupAndCreateTopic(bootstrap);
+        setupConsumer(bootstrap, getSchemaRegistryUrl());
+        outboxRepository.deleteAll();
     }
 
     @NotNull
@@ -160,5 +156,30 @@ public abstract class BaseKafkaTestCase {
             } catch(Exception ignored) {
             }
         }
+    }
+
+    /**
+     * Creates a Kafka consumer with the specified isolation level.
+     *
+     * @param isolationLevel The isolation level for the consumer (e.g., "read_committed", "read_uncommitted").
+     *                       If null or blank, no specific isolation level is set.
+     * @return A new {@link Consumer} instance.
+     * It is the caller's responsibility to close this consumer when it is no longer needed.
+     */
+    protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) {
+        Map<String, Object> consumerProps = new HashMap<>();
+        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
+        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-"+UUID.randomUUID());
+        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaProtobufDeserializer.class);
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        consumerProps.put("schema.registry.url", getSchemaRegistryUrl());
+        consumerProps.put("specific.protobuf.value.type", WeatherPacket.class.getName());
+        if(isolationLevel!=null && !isolationLevel.isBlank()) {
+            consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
+        }
+        return new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
     }
 }

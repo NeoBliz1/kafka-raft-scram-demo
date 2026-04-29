@@ -18,6 +18,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Integration test for "at-most-once" Kafka delivery semantics.
+ * This test simulates network disruptions using ToxiProxy to verify that
+ * messages are not duplicated, even if some might be lost during network cuts.
+ */
 @Slf4j
 @ActiveProfiles({ "test-transactions-off", "test" })
 @SpringBootTest(properties = {
@@ -31,6 +36,13 @@ import java.util.concurrent.TimeUnit;
 })
 class KafkaDeliveryStateAtMostOneTest extends BaseToxyProxyTestCase {
 
+    /**
+     * Verifies partial message loss and no duplicates when a random connection cut occurs.
+     * This test simulates a network outage during message production and asserts that
+     * while some messages may be lost (at-most-once), no messages are duplicated.
+     *
+     * @throws Exception if any error occurs during the test execution.
+     */
     @Test
     void verifyPartialLossOnRandomConnectionCut() throws Exception {
         log.info("WARMUP: Initializing producer...");

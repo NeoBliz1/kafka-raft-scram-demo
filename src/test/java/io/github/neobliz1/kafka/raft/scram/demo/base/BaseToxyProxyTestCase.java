@@ -14,10 +14,16 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.File;
 
+/**
+ * Base test class for integration tests that require ToxiProxy for simulating network issues.
+ * This class sets up a Docker Compose environment with Kafka, Schema Registry, and ToxiProxy,
+ * and provides utilities for managing the proxy and its toxics.
+ */
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class BaseToxyProxyTestCase extends BaseKafkaTestCase {
@@ -29,7 +35,7 @@ public abstract class BaseToxyProxyTestCase extends BaseKafkaTestCase {
     protected static Proxy KAFKA_PROXY;
     protected static String PROXY_BOOTSTRAP_ADDRESS;
 
-    @org.testcontainers.junit.jupiter.Container
+    @Container
     static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-toxy-proxy.yml"))
             .withExposedService(TOXIPROXY, TOXI_PORT_1, Wait.forListeningPort())
             .withExposedService(KAFKA, KAFKA_PORT, Wait.forListeningPort())
@@ -38,6 +44,11 @@ public abstract class BaseToxyProxyTestCase extends BaseKafkaTestCase {
             .withExposedService(TOXIPROXY, TOXI_PORT_2, Wait.forListeningPort());
 
 
+    /**
+     * Sets up the ToxiProxy client and creates a proxy for the Kafka service before any tests are run.
+     *
+     * @throws Exception if any error occurs during setup.
+     */
     @BeforeAll
     static void setupToxiproxy() throws Exception {
         await().atMost(60, SECONDS).pollInterval(2, SECONDS).until(() -> {
@@ -75,6 +86,11 @@ public abstract class BaseToxyProxyTestCase extends BaseKafkaTestCase {
         registry.add("spring.kafka.admin.properties.bootstrap.servers", () -> PROXY_BOOTSTRAP_ADDRESS);
     }
 
+    /**
+     * Sets up the test environment before each test, including removing any existing toxics.
+     *
+     * @throws Exception if any error occurs during setup.
+     */
     @BeforeEach
     @Override
     void setUp() throws Exception {
@@ -84,6 +100,9 @@ public abstract class BaseToxyProxyTestCase extends BaseKafkaTestCase {
         super.setUp();
     }
 
+    /**
+     * Tears down the test environment after each test, including removing any existing toxics.
+     */
     @AfterEach
     @Override
     void tearDown() {

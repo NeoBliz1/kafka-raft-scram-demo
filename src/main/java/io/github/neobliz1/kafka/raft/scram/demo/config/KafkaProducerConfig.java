@@ -29,16 +29,24 @@ public class KafkaProducerConfig {
 
     private final KafkaProperties kafkaProperties;
 
+    /**
+     * Custom transaction ID prefix for Kafka producers, loaded from application properties.
+     */
     @Value("${spring.kafka.producer.custom-transaction-id-prefix}")
     private String customKafkaTransactionPrefix;
 
+    /**
+     * The name of the Kafka topic, loaded from application properties.
+     */
     @Value("${app.kafka.topic.name}")
     private String topicName;
 
     /**
-     * Creates a Kafka producer factory.
+     * Creates a Kafka producer factory with transactional capabilities.
+     * This factory is active when the "test-transactions-off" profile is NOT active.
+     * The transaction ID prefix is dynamically generated using the hostname.
      *
-     * @return The Kafka producer factory.
+     * @return The Kafka producer factory configured for transactions.
      */
     @Bean
     @Profile("!test-transactions-off")
@@ -58,6 +66,12 @@ public class KafkaProducerConfig {
         return producerFactory;
     }
 
+    /**
+     * Creates a Kafka producer factory without transactional capabilities.
+     * This factory is active when the "test-transactions-off" profile IS active.
+     *
+     * @return The Kafka producer factory without transactional configuration.
+     */
     @Bean
     @Profile("test-transactions-off")
     public ProducerFactory<String, WeatherPacket> producerFactory() {
@@ -71,6 +85,7 @@ public class KafkaProducerConfig {
     /**
      * Creates a Kafka template.
      *
+     * @param producerFactory The Kafka producer factory to use.
      * @return The Kafka template.
      */
     @Bean
@@ -79,10 +94,11 @@ public class KafkaProducerConfig {
     }
 
     /**
-     * Creates a weather ingestion producer.
+     * Creates a weather ingestion producer with transactional capabilities.
+     * This producer is active when the "test-transactions-off" profile is NOT active.
      *
-     * @param kafkaTemplate The Kafka template.
-     * @return The weather ingestion producer.
+     * @param kafkaTemplate The Kafka template configured for transactions.
+     * @return The weather ingestion producer with transactional support.
      */
     @Bean
     @Profile("!test-transactions-off")
@@ -90,6 +106,14 @@ public class KafkaProducerConfig {
         return new WeatherIngestionProducer(kafkaTemplate);
     }
 
+    /**
+     * Creates a weather ingestion producer without transactional capabilities.
+     * This producer is active when the "test-transactions-off" profile IS active.
+     * It overrides the `sendTransactional` method to send messages non-transactionally.
+     *
+     * @param kafkaTemplate The Kafka template.
+     * @return The weather ingestion producer without transactional support.
+     */
     @Bean
     @Profile("test-transactions-off")
     public WeatherIngestionProducer weatherStationProducer(KafkaTemplate<String, WeatherPacket> kafkaTemplate) {

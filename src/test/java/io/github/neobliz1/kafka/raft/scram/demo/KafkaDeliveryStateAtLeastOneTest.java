@@ -20,6 +20,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Integration test for "at-least-once" Kafka delivery semantics.
+ * This test uses ToxiProxy to introduce network latency, simulating conditions
+ * where producers might retry sending messages, leading to duplicates.
+ * It verifies that messages are delivered at least once, potentially with duplicates.
+ */
 @Slf4j
 @ActiveProfiles({ "test-transactions-off", "test" })
 @SpringBootTest(properties = {
@@ -32,6 +38,15 @@ import java.util.concurrent.TimeUnit;
 })
 class KafkaDeliveryStateAtLeastOneTest extends BaseToxyProxyTestCase {
 
+    /**
+     * Verifies at-least-once delivery semantics by introducing network latency
+     * and checking for duplicate messages.
+     * The test sets up a scenario where the Kafka producer's request times out
+     * due to high latency, causing retries and thus leading to duplicate messages
+     * being consumed.
+     *
+     * @throws Exception if any error occurs during the test execution.
+     */
     @Test
     void verifyAtLeastOnceDeliveryWithLatencyToxic() throws Exception {
         String warmupStationId = "warmup-"+UUID.randomUUID();

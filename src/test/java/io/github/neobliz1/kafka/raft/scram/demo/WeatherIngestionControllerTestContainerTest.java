@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.testcontainers.shaded.org.awaitility.Awaitility.await;
 
 import io.github.neobliz1.kafka.raft.scram.demo.base.BaseKafkaTestCase;
+import io.github.neobliz1.kafka.raft.scram.demo.controller.WeatherIngestionController;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Integration test for {@link WeatherIngestionController} using Testcontainers.
+ * This test sets up a Kafka and Schema Registry environment using a Docker Compose
+ * file to verify the end-to-end ingestion and production of weather data.
+ */
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -32,6 +38,9 @@ class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
     protected static String BOOTSTRAP_SERVERS_URL;
     protected static String REGISTRY_URL;
 
+    /**
+     * The Docker Compose container environment, which includes Kafka and Schema Registry services.
+     */
     @Container
     static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-no-auth-kafka.yml"))
             .withExposedService(KAFKA, KAFKA_PORT)
@@ -60,6 +69,11 @@ class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
         return REGISTRY_URL;
     }
 
+    /**
+     * Tests the end-to-end flow of ingesting a weather packet and verifying its production to Kafka.
+     *
+     * @throws Exception if any error occurs during the test execution.
+     */
     @Test
     void shouldIngestAndProduceWeatherData() throws Exception {
         String batchId = UUID.randomUUID().toString();

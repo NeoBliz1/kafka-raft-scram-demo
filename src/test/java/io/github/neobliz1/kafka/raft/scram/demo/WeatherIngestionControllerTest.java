@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.neobliz1.kafka.raft.scram.demo.controller.WeatherIngestionController;
 import io.github.neobliz1.kafka.raft.scram.demo.producer.WeatherIngestionProducer;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -31,6 +32,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * Integration tests for the {@link WeatherIngestionController}.
+ * This class uses an embedded Kafka broker to test the end-to-end
+ * flow of ingesting weather data and sending it to Kafka.
+ */
 @ActiveProfiles({ "test-transactions-off", "test" })
 @AutoConfigureMockMvc
 @EmbeddedKafka(
@@ -54,12 +60,9 @@ class WeatherIngestionControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
-
     @Autowired
     private EmbeddedKafkaBroker embeddedKafka;
-
     private static final String TOPIC_NAME = "testTopic";
-
     private Consumer<String, WeatherPacket> consumer;
 
     @BeforeEach
