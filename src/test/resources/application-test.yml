@@ -1,0 +1,4 @@
+app:
+  kafka:
+    topic:
+      name: testTopic

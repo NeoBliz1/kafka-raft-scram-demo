@@ -2,20 +2,18 @@ package io.github.neobliz1.kafka.raft.scram.demo;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.testcontainers.shaded.org.awaitility.Awaitility.await;
 
+import io.github.neobliz1.kafka.raft.scram.demo.base.BaseKafkaTestCase;
+import io.github.neobliz1.kafka.raft.scram.demo.controller.WeatherIngestionController;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -26,23 +24,29 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Integration test for {@link WeatherIngestionController} using Testcontainers.
+ * This test sets up a Kafka and Schema Registry environment using a Docker Compose
+ * file to verify the end-to-end ingestion and production of weather data.
+ */
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles({ "test-transactions-off", "test" })
 class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
 
     protected static String BOOTSTRAP_SERVERS_URL;
     protected static String REGISTRY_URL;
 
+    /**
+     * The Docker Compose container environment, which includes Kafka and Schema Registry services.
+     */
     @Container
     static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-no-auth-kafka.yml"))
             .withExposedService(KAFKA, KAFKA_PORT)
             .withExposedService(SCHEMA_REGISTRY, SCHEMA_REGISTRY_PORT, Wait.forHttp("/subjects")
                     .forPort(SCHEMA_REGISTRY_PORT)
                     .forStatusCode(200));
-
-    @Autowired
-    private MockMvc mockMvc;
 
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
@@ -65,18 +69,16 @@ class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
         return REGISTRY_URL;
     }
 
+    /**
+     * Tests the end-to-end flow of ingesting a weather packet and verifying its production to Kafka.
+     *
+     * @throws Exception if any error occurs during the test execution.
+     */
     @Test
     void shouldIngestAndProduceWeatherData() throws Exception {
-        String stationId = "station-"+UUID.randomUUID();
-        WeatherPacket weatherPacket = WeatherPacket.newBuilder()
-                .setStationId(stationId)
-                .setTimestamp(Instant.now().toEpochMilli())
-                .build();
+        String batchId = UUID.randomUUID().toString();
 
-        mockMvc.perform(post(API_V_1_WEATHER)
-                        .contentType(MediaType.APPLICATION_PROTOBUF_VALUE)
-                        .content(weatherPacket.toByteArray()))
-                .andExpect(status().isAccepted());
+        sendWeatherPacket(batchId, Instant.now().toEpochMilli());
 
         await().atMost(15, SECONDS)
                 .pollInterval(Duration.ofMillis(200))
@@ -86,7 +88,7 @@ class WeatherIngestionControllerTestContainerTest extends BaseKafkaTestCase {
                     assertThat(records).withFailMessage("No records received from Kafka").isNotEmpty();
 
                     WeatherPacket consumedPacket = records.iterator().next().value();
-                    assertThat(consumedPacket.getStationId()).isEqualTo(stationId);
+                    assertThat(consumedPacket.getStationId()).isEqualTo(getStationId(batchId));
                 });
     }
 }

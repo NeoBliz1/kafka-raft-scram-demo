@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import io.github.neobliz1.kafka.raft.scram.demo.controller.WeatherIngestionController;
+import io.github.neobliz1.kafka.raft.scram.demo.producer.WeatherIngestionProducer;
 import io.github.neobliz1.kafka.raft.scram.demo.proto.WeatherPacket;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -13,44 +15,54 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * Integration tests for the {@link WeatherIngestionController}.
+ * This class uses an embedded Kafka broker to test the end-to-end
+ * flow of ingesting weather data and sending it to Kafka.
+ */
+@ActiveProfiles({ "test-transactions-off", "test" })
 @AutoConfigureMockMvc
 @EmbeddedKafka(
         partitions = 1,
-        topics = { "${app.kafka.topic.name}" }
+        topics = { "testTopic" }
 )
+
+@ComponentScan(excludeFilters = @ComponentScan.Filter(
+        type = FilterType.ASSIGNABLE_TYPE,
+        classes = { WeatherIngestionProducer.class }
+))
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(
         classes = IngestionApplication.class,
         properties = {
                 "spring.kafka.bootstrap-servers=${spring.embedded.kafka.brokers}",
-                // 2. Use the mock schema registry protocol for the producer
-                "spring.kafka.producer.properties.schema.registry.url=mock://test-url"
+                "spring.kafka.producer.properties.schema.registry.url=mock://test-url",
         }
 )
 class WeatherIngestionControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
-
     @Autowired
     private EmbeddedKafkaBroker embeddedKafka;
-
-    @Value("${app.kafka.topic.name}")
-    private String topicName;
-
+    private static final String TOPIC_NAME = "testTopic";
     private Consumer<String, WeatherPacket> consumer;
 
     @BeforeEach
@@ -63,7 +75,7 @@ class WeatherIngestionControllerTest {
 
         DefaultKafkaConsumerFactory<String, WeatherPacket> consumerFactory = new DefaultKafkaConsumerFactory<>(consumerProps);
         consumer = consumerFactory.createConsumer();
-        embeddedKafka.consumeFromAnEmbeddedTopic(consumer, topicName);
+        embeddedKafka.consumeFromAnEmbeddedTopic(consumer, TOPIC_NAME);
     }
 
     @AfterEach

@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Controller for ingesting weather data.
+ * REST controller for ingesting weather data.
+ * This controller exposes an endpoint for receiving {@link WeatherPacket}
+ * and delegates the processing to {@link WeatherIngestionService}.
  */
 @Slf4j
 @RestController
@@ -23,10 +25,11 @@ public class WeatherIngestionController {
     private final WeatherIngestionService weatherIngestionService;
 
     /**
-     * Ingests a weather packet.
+     * Ingests a weather packet received via a POST request.
+     * The request body should be in Protobuf format.
      *
-     * @param weatherPacket The weather packet to ingest.
-     * @return A response entity with the status of the ingestion.
+     * @param weatherPacket The {@link WeatherPacket} to ingest.
+     * @return A {@link ResponseEntity} indicating the acceptance of the request.
      */
     @PostMapping(consumes = MediaType.APPLICATION_PROTOBUF_VALUE)
     public ResponseEntity<Void> ingest(@RequestBody WeatherPacket weatherPacket) {
