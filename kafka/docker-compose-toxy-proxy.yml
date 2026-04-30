@@ -2,8 +2,8 @@ services:
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.12.0
     ports:
-      - "8474:8474"   # Management API
-      - "9094:9094"   # The "Proxy" port your app should connect to
+      - "8474"
+      - "9094:9094"
     networks:
       - eco-net
 
@@ -17,7 +17,7 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:19093'
-      KAFKA_LISTENERS: 'INTERNAL://:9093,CLIENT://:9092,CONTROLLER://:19093'
+      KAFKA_LISTENERS: 'INTERNAL://kafka:9093,CLIENT://0.0.0.0:9092,CONTROLLER://kafka:19093'
       KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka:9093,CLIENT://localhost:9094'
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:PLAINTEXT,CLIENT:PLAINTEXT,CONTROLLER:PLAINTEXT'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
@@ -46,7 +46,7 @@ services:
           --replication-factor 1 \
           --topic WeatherPacketReceived
       
-        echo 'Topic created successfully'aq
+        echo 'Topic created successfully'
       "
 
   schema-registry:

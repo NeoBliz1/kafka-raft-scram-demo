@@ -18,7 +18,6 @@ import org.springframework.kafka.core.ProducerFactory;
 
 import java.net.InetAddress;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 
 /**
  * Configuration class for Kafka producer.
@@ -119,11 +118,9 @@ public class KafkaProducerConfig {
     public WeatherIngestionProducer weatherStationProducer(KafkaTemplate<String, WeatherPacket> kafkaTemplate) {
         return new WeatherIngestionProducer(kafkaTemplate) {
             @Override
-            public RecordMetadata sendTransactional(WeatherPacket weatherPacket)
-                    throws ExecutionException, InterruptedException {
-                return kafkaTemplate.send(topicName, weatherPacket.getStationId(), weatherPacket)
-                        .get()
-                        .getRecordMetadata();
+            public RecordMetadata sendTransactional(WeatherPacket weatherPacket) {
+                kafkaTemplate.send(topicName, weatherPacket.getStationId(), weatherPacket);
+                return null;
             }
         };
     }

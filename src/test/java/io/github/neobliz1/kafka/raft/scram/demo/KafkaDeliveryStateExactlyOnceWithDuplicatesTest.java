@@ -171,6 +171,8 @@ class KafkaDeliveryStateExactlyOnceWithDuplicatesTest extends BaseKafkaTestCase 
                         firstMsg.getStationId(), firstMsg.getTimestamp(),
                         filteredRecords.get(0).offset(), filteredRecords.get(1).offset());
             });
+        } catch(InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         log.info("Test Successful: Found 2 committed duplicates for station {}", batchId);

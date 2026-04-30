@@ -72,14 +72,13 @@ public abstract class BaseKafkaTestCase {
 
     protected abstract String getBootstrapServers();
 
-    protected abstract String getSchemaRegistryUrl();
+    protected abstract String getSchemaRegistryUrl() throws InterruptedException;
 
     @AfterAll
     static void cleanup() {
         try {
             Files.deleteIfExists(Path.of("./data/weatherdb.mv.db"));
             Files.deleteIfExists(Path.of("./data/weatherdb.trace.db"));
-            Files.deleteIfExists(Path.of("./data"));
         } catch(IOException e) {
             log.warn("Failed to clean up H2 database files", e);
         }
@@ -99,7 +98,7 @@ public abstract class BaseKafkaTestCase {
         }
     }
 
-    private void setupConsumer(String bootstrap, String registryUrl) {
+    private void setupConsumer() throws InterruptedException {
         if(consumer!=null) {
             try {
                 consumer.close();
@@ -121,7 +120,7 @@ public abstract class BaseKafkaTestCase {
             }
         });
         cleanupAndCreateTopic(bootstrap);
-        setupConsumer(bootstrap, getSchemaRegistryUrl());
+        setupConsumer();
         outboxRepository.deleteAll();
     }
 
@@ -166,7 +165,7 @@ public abstract class BaseKafkaTestCase {
      * @return A new {@link Consumer} instance.
      * It is the caller's responsibility to close this consumer when it is no longer needed.
      */
-    protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) {
+    protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) throws InterruptedException {
         Map<String, Object> consumerProps = new HashMap<>();
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group-"+UUID.randomUUID());
