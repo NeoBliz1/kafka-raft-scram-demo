@@ -43,7 +43,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Testcontainers
-@ActiveProfiles({ "test" })
+@ActiveProfiles("test")
 @SpringBootTest(properties = {
         "spring.kafka.producer.acks=all",
         "spring.kafka.producer.retries=10",

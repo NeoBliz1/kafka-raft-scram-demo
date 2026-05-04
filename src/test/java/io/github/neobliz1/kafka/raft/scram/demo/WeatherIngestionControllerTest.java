@@ -24,7 +24,6 @@ import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -37,18 +36,16 @@ import java.util.Map;
  * This class uses an embedded Kafka broker to test the end-to-end
  * flow of ingesting weather data and sending it to Kafka.
  */
-@ActiveProfiles({ "test-transactions-off", "test" })
 @AutoConfigureMockMvc
+@ActiveProfiles({ "test-transactions-off", "test" })
 @EmbeddedKafka(
         partitions = 1,
         topics = { "testTopic" }
 )
-
 @ComponentScan(excludeFilters = @ComponentScan.Filter(
         type = FilterType.ASSIGNABLE_TYPE,
         classes = { WeatherIngestionProducer.class }
 ))
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(
         classes = IngestionApplication.class,
         properties = {

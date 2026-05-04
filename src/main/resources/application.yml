@@ -14,6 +14,10 @@ spring:
     open-in-view: false
   kafka:
     bootstrap-servers: localhost:9092
+    properties:
+      security.protocol: SASL_PLAINTEXT
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username='${KAFKA_USER}' password='${KAFKA_PASSWORD}';"
     producer:
       acks: all
       retries: 10
@@ -32,7 +36,6 @@ spring:
       properties:
         security.protocol: PLAINTEXT
 
-# Custom application properties
 app:
   kafka:
     topic:
