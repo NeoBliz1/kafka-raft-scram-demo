@@ -1,0 +1,87 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    ports:
+      - "9092:9092"
+    networks:
+      - eco-net
+    secrets:
+      - kafka_server_jaas
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:19093'
+      KAFKA_LISTENERS: 'INTERNAL://:9093,CLIENT://:9092,CONTROLLER://:19093'
+      KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka:9093,CLIENT://localhost:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'INTERNAL:SASL_PLAINTEXT,CLIENT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'INTERNAL'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/run/secrets/kafka_server_jaas"
+
+      # SASL/PLAIN (Basic Auth) Configuration
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+
+      # KRaft Settings
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    networks:
+      - eco-net
+    depends_on:
+      - kafka
+    command: >
+      bash -c "
+        echo 'Waiting for Kafka...'
+        echo 'security.protocol=SASL_PLAINTEXT' > /tmp/admin.properties
+        echo 'sasl.mechanism=PLAIN' >> /tmp/admin.properties
+        echo \"sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username='admin' password='admin-password';\" >> /tmp/admin.properties
+
+        cub kafka-ready -b kafka:9093 -c /tmp/admin.properties 1 60
+      
+        echo '=== Creating topic WeatherPacketReceived ==='
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:9093 --command-config /tmp/admin.properties --partitions 1 --replication-factor 1 --topic WeatherPacketReceived
+
+        echo '=== Verifying topic creation ==='
+        kafka-topics --bootstrap-server kafka:9093 --command-config /tmp/admin.properties --describe --topic WeatherPacketReceived
+
+        echo '=== SETUP COMPLETED SUCCESSFULLY ==='
+      "
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    ports:
+      - "8085:8081"
+    networks:
+      - eco-net
+    depends_on:
+      - kafka
+    secrets:
+      - schema_registry_jaas
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:9093'
+      SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
+      # Security for Schema Registry
+      SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/run/secrets/schema_registry_jaas"
+      SCHEMA_REGISTRY_OPTS: "-Djava.security.auth.login.config=/run/secrets/schema_registry_jaas"
+
+secrets:
+  kafka_server_jaas:
+    file: ./secrets/kafka_server_jaas.conf
+  schema_registry_jaas:
+    file: ./secrets/schema_registry_jaas.conf
+
+networks:
+  eco-net:
+    driver: bridge

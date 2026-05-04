@@ -24,8 +24,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.io.IOException;
@@ -46,8 +44,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
-@TestPropertySource(locations = "classpath:application.yml")
 public abstract class BaseKafkaTestCase {
 
     public static final String API_V_1_WEATHER = "/api/v1/weather";
@@ -84,18 +80,17 @@ public abstract class BaseKafkaTestCase {
         }
     }
 
-    private void cleanupAndCreateTopic(String bootstrap) throws Exception {
-        try(var admin = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap))) {
-            var topics = admin.listTopics().names().get(10, TimeUnit.SECONDS);
-            if(topics.contains(topicName)) {
-                admin.deleteTopics(Collections.singletonList(topicName)).all().get(10, TimeUnit.SECONDS);
-                Thread.sleep(3000);
-            }
-            NewTopic newTopic = new NewTopic(topicName, 1, (short) 1);
-            newTopic.configs(Map.of("min.insync.replicas", "1", "retention.ms", "60000"));
-            admin.createTopics(Collections.singletonList(newTopic)).all().get(10, TimeUnit.SECONDS);
-            Thread.sleep(3000);
+    @BeforeEach
+    void setUp() throws Exception {
+        String bootstrap = getBootstrapServers();
+        Map<String, Object> adminProps = new HashMap<>(getSecurityProps());
+        adminProps.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
+        try(AdminClient admin = AdminClient.create(adminProps)) {
+            await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> admin.listTopics().names().get(5, TimeUnit.SECONDS));
+            cleanupAndCreateTopic(admin);
         }
+        setupConsumer();
+        outboxRepository.deleteAll();
     }
 
     private void setupConsumer() throws InterruptedException {
@@ -109,19 +104,6 @@ public abstract class BaseKafkaTestCase {
         consumer.subscribe(Collections.singleton(topicName));
         consumer.poll(Duration.ofMillis(500));
         consumer.commitSync();
-    }
-
-    @BeforeEach
-    void setUp() throws Exception {
-        String bootstrap = getBootstrapServers();
-        await().atMost(60, TimeUnit.SECONDS).untilAsserted(() -> {
-            try(var admin = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap))) {
-                admin.listTopics().names().get(10, TimeUnit.SECONDS);
-            }
-        });
-        cleanupAndCreateTopic(bootstrap);
-        setupConsumer();
-        outboxRepository.deleteAll();
     }
 
     @NotNull
@@ -147,14 +129,14 @@ public abstract class BaseKafkaTestCase {
         log.info("Message {}: build={}ms, send={}ms", index, buildTime, sendTime);
     }
 
-    @AfterEach
-    void tearDown() {
-        if(consumer!=null) {
-            try {
-                consumer.close();
-            } catch(Exception ignored) {
-            }
+    private void cleanupAndCreateTopic(AdminClient admin) throws Exception {
+        var topics = admin.listTopics().names().get(10, TimeUnit.SECONDS);
+        if(topics.contains(topicName)) {
+            admin.deleteTopics(Collections.singletonList(topicName)).all().get(10, TimeUnit.SECONDS);
+            Thread.sleep(2000);
         }
+        NewTopic newTopic = new NewTopic(topicName, 1, (short) 1);
+        admin.createTopics(Collections.singletonList(newTopic)).all().get(10, TimeUnit.SECONDS);
     }
 
     /**
@@ -175,10 +157,25 @@ public abstract class BaseKafkaTestCase {
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
         consumerProps.put("schema.registry.url", getSchemaRegistryUrl());
+        consumerProps.putAll(getSecurityProps());
         consumerProps.put("specific.protobuf.value.type", WeatherPacket.class.getName());
         if(isolationLevel!=null && !isolationLevel.isBlank()) {
             consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
         }
         return new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
+    }
+
+    protected Map<String, Object> getSecurityProps() {
+        return Collections.emptyMap();
+    }
+
+    @AfterEach
+    void tearDown() {
+        if(consumer!=null) {
+            try {
+                consumer.close();
+            } catch(Exception ignored) {
+            }
+        }
     }
 }

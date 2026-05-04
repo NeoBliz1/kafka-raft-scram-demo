@@ -1,6 +1,0 @@
-logging:
-  level:
-    root: WARN
-    com.eco.ingestion: INFO
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %-40.40logger{39} : %msg%n"

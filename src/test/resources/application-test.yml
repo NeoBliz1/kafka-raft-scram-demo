@@ -1,3 +1,20 @@
+spring:
+  kafka:
+    properties:
+      security.protocol: PLAINTEXT
+      sasl.mechanism: !!null
+      sasl.jaas.config: !!null
+    producer:
+      properties:
+        security.protocol: PLAINTEXT
+        sasl.mechanism: !!null
+        sasl.jaas.config: !!null
+    consumer:
+      properties:
+        security.protocol: PLAINTEXT
+        sasl.mechanism: !!null
+        sasl.jaas.config: !!null
+
 app:
   kafka:
     topic:
