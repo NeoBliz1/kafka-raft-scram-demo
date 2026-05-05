@@ -28,8 +28,18 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Integration test for "at-most-once" Kafka delivery semantics.
+ * <p>
  * This test simulates network disruptions using ToxiProxy to verify that
- * messages are not duplicated, even if some might be lost during network cuts.
+ * messages are not duplicated when the producer is configured with retries disabled.
+ * Under these conditions, some messages may be lost during a network cut, but
+ * no message should ever be delivered more than once.
+ * </p>
+ * <p>
+ * The producer is configured with:
+ * - {@code acks=all}: To ensure the leader waits for all in-sync replicas.
+ * - {@code retries=0}: To disable producer-side retries, which is key to at-most-once.
+ * - {@code enable.idempotence=false}: Idempotence is disabled as it's not needed without retries.
+ * </p>
  */
 @Slf4j
 @ActiveProfiles({ "test-transactions-off", "test" })
@@ -44,6 +54,9 @@ import java.util.concurrent.ThreadLocalRandom;
 })
 class KafkaDeliveryStateAtMostOneTest extends BaseToxyProxyTestCase {
 
+    /**
+     * The Docker Compose environment, which includes Kafka, Schema Registry, and ToxiProxy.
+     */
     @Container
     static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-toxy-proxy.yml"))
             .withExposedService(TOXIPROXY, TOXI_PORT_1, Wait.forListeningPort())
@@ -57,6 +70,11 @@ class KafkaDeliveryStateAtMostOneTest extends BaseToxyProxyTestCase {
         setupToxiproxy(ENVIRONMENT);
     }
 
+    /**
+     * Overrides Spring Boot properties to point Kafka clients to the ToxiProxy instance.
+     *
+     * @param registry The dynamic property registry.
+     */
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", () -> PROXY_BOOTSTRAP_ADDRESS);
@@ -65,6 +83,9 @@ class KafkaDeliveryStateAtMostOneTest extends BaseToxyProxyTestCase {
         registry.add("spring.kafka.admin.properties.bootstrap.servers", () -> PROXY_BOOTSTRAP_ADDRESS);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected String getSchemaRegistryUrl() {
         return "http://localhost:"+ENVIRONMENT.getServicePort(SCHEMA_REGISTRY, SCHEMA_REGISTRY_PORT);
@@ -72,8 +93,13 @@ class KafkaDeliveryStateAtMostOneTest extends BaseToxyProxyTestCase {
 
     /**
      * Verifies partial message loss and no duplicates when a random connection cut occurs.
-     * This test simulates a network outage during message production and asserts that
-     * while some messages may be lost (at-most-once), no messages are duplicated.
+     * <p>
+     * This test simulates a network outage during message production by using ToxiProxy
+     * to cut the connection between the client and the Kafka broker. It asserts that:
+     * 1. Some messages are lost due to the network failure (confirming at-most-once).
+     * 2. No messages are duplicated.
+     * 3. At least some messages are successfully delivered before the network cut.
+     * </p>
      *
      * @throws Exception if any error occurs during the test execution.
      */

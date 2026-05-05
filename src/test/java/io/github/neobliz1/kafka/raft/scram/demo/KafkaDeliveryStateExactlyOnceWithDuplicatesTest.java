@@ -36,10 +36,21 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Integration test for demonstrating "exactly-once" delivery challenges and solutions
- * in Kafka when idempotence is enabled but transactions are not fully coordinated
- * across services (e.g., database and Kafka).
- * This test uses Testcontainers to set up a Kafka environment.
+ * Integration test demonstrating a "duplicate message" scenario in a system
+ * striving for exactly-once semantics (EOS).
+ * <p>
+ * This test simulates a failure where a Kafka message is successfully produced
+ * within a transaction, but the subsequent database commit fails. A recovery process
+ * then re-reads the pending state from the database and sends the same message again.
+ * Even with an idempotent producer, this results in a duplicate message in Kafka because
+ * the recovery process initiates a new transaction with a new producer instance,
+ * thus getting a different Producer ID (PID).
+ * </p>
+ * <p>
+ * This scenario highlights a common challenge in achieving true end-to-end EOS
+ * and underscores the need for a robust transactional outbox pattern where the
+ * database transaction and Kafka production are atomically linked.
+ * </p>
  */
 @Slf4j
 @Testcontainers
@@ -70,6 +81,11 @@ class KafkaDeliveryStateExactlyOnceWithDuplicatesTest extends BaseKafkaTestCase 
     @Autowired
     private WeatherIngestionService weatherIngestionService;
 
+    /**
+     * Overrides Spring Boot properties at runtime to use the dynamic URLs from the Testcontainers.
+     *
+     * @param registry The dynamic property registry.
+     */
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
         BOOTSTRAP_SERVERS_URL = ENVIRONMENT.getServiceHost(KAFKA, KAFKA_PORT)+":"+ENVIRONMENT.getServicePort(KAFKA, KAFKA_PORT);
@@ -81,11 +97,17 @@ class KafkaDeliveryStateExactlyOnceWithDuplicatesTest extends BaseKafkaTestCase 
         registry.add("spring.kafka.admin.properties.bootstrap.servers", () -> BOOTSTRAP_SERVERS_URL);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected String getBootstrapServers() {
         return BOOTSTRAP_SERVERS_URL;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     protected String getSchemaRegistryUrl() {
         return REGISTRY_URL;
@@ -112,12 +134,17 @@ class KafkaDeliveryStateExactlyOnceWithDuplicatesTest extends BaseKafkaTestCase 
     }
 
     /**
-     * Tests a scenario where a message is sent to Kafka, but a subsequent database
-     * operation fails, leading to a "duplicate" message being sent upon recovery.
-     * This highlights the need for proper transactional outbox patterns to achieve
-     * exactly-once semantics when coordinating between a database and Kafka.
-     * The test verifies that two identical messages (based on business key) are
-     * present in Kafka, but at different offsets, demonstrating the duplicate.
+     * Tests the duplicate message scenario.
+     * <p>
+     * The test proceeds in three steps:
+     * 1. **Trigger Failure**: A message is processed, sent to Kafka, but a simulated database error
+     *    causes the local transaction to roll back, leaving the outbox record in a 'PENDING' state.
+     * 2. **Run Recovery**: A manual recovery process is triggered, which finds the 'PENDING' record
+     *    and sends the message to Kafka *again*.
+     * 3. **Verify Duplicates**: The test consumes from the topic with 'read_committed' isolation level
+     *    and asserts that two identical messages (by business key) exist at different offsets,
+     *    proving that a duplicate was committed to the log.
+     * </p>
      */
     @Test
     void testExactlyOnceDuplicateSimulation() {
