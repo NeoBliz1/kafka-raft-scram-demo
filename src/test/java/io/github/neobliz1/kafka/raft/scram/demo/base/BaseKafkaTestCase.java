@@ -38,8 +38,12 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Base test class for Kafka-related integration tests.
- * This class provides common setup and teardown operations for Kafka,
- * including topic management, consumer creation, and test utilities.
+ * <p>
+ * This abstract class provides a foundational setup for integration tests that involve Kafka.
+ * It handles the lifecycle of Kafka topics, consumer setup, and provides utility methods
+ * for interacting with the system under test. Subclasses are expected to provide
+ * the specific Kafka bootstrap server and Schema Registry URLs.
+ * </p>
  */
 @Slf4j
 @SpringBootTest
@@ -52,24 +56,26 @@ public abstract class BaseKafkaTestCase {
     public static final String SCHEMA_REGISTRY = "schema-registry";
     public static final int SCHEMA_REGISTRY_PORT = 8081;
     /**
-     * Kafka consumer for testing purposes.
-     * This consumer is initialized in {@link #setUp()} and closed in {@link #tearDown()}.
+     * Kafka consumer for verifying that messages are produced correctly.
+     * This consumer is subscribed to the test topic and is reset before each test.
      */
     protected Consumer<String, WeatherPacket> consumer;
 
     @Autowired
     protected MockMvc mockMvc;
 
+    /**
+     * Repository for accessing the outbox table, used for verifying transactional outbox patterns.
+     */
     @Autowired
     protected OutboxRepository outboxRepository;
 
     @Value("${app.kafka.topic.name}")
     protected String topicName;
 
-    protected abstract String getBootstrapServers();
-
-    protected abstract String getSchemaRegistryUrl() throws InterruptedException;
-
+    /**
+     * Cleans up H2 database files after all tests in the class have run.
+     */
     @AfterAll
     static void cleanup() {
         try {
@@ -80,6 +86,46 @@ public abstract class BaseKafkaTestCase {
         }
     }
 
+    /**
+     * Generates a station ID based on a batch identifier.
+     *
+     * @param batchId The unique identifier for the batch.
+     * @return A formatted station ID string.
+     */
+    @NotNull
+    public static String getStationId(String batchId) {
+        return "station-"+batchId;
+    }
+
+    /**
+     * Provides the Kafka bootstrap servers URL.
+     * <p>
+     * Subclasses must implement this method to return the appropriate bootstrap server address,
+     * which might be from a Testcontainers-managed Kafka instance or an embedded broker.
+     * </p>
+     *
+     * @return The Kafka bootstrap servers URL as a string.
+     */
+    protected abstract String getBootstrapServers();
+
+    /**
+     * Provides the Schema Registry URL.
+     * <p>
+     * Subclasses must implement this method to return the URL of the Schema Registry.
+     * </p>
+     *
+     * @return The Schema Registry URL as a string.
+     * @throws InterruptedException if the thread is interrupted while waiting for the URL.
+     */
+    protected abstract String getSchemaRegistryUrl() throws InterruptedException;
+
+    /**
+     * Sets up the test environment before each test.
+     * This method waits for the Kafka broker to be ready, cleans up and recreates the test topic,
+     * initializes the Kafka consumer, and clears the outbox repository.
+     *
+     * @throws Exception if any part of the setup fails.
+     */
     @BeforeEach
     void setUp() throws Exception {
         String bootstrap = getBootstrapServers();
@@ -93,6 +139,11 @@ public abstract class BaseKafkaTestCase {
         outboxRepository.deleteAll();
     }
 
+    /**
+     * Initializes or resets the Kafka consumer for the test.
+     * If a consumer instance already exists, it is closed before a new one is created.
+     * The new consumer is subscribed to the test topic.
+     */
     private void setupConsumer() throws InterruptedException {
         if(consumer!=null) {
             try {
@@ -106,11 +157,13 @@ public abstract class BaseKafkaTestCase {
         consumer.commitSync();
     }
 
-    @NotNull
-    public static String getStationId(String batchId) {
-        return "station-"+batchId;
-    }
-
+    /**
+     * Sends a weather packet to the ingestion endpoint.
+     *
+     * @param batchId A unique identifier for the batch of data.
+     * @param index   A sequential index for the message within the batch.
+     * @throws Exception if the HTTP request fails.
+     */
     public void sendWeatherPacket(String batchId, long index) throws Exception {
         long start = System.currentTimeMillis();
         WeatherPacket packet = WeatherPacket.newBuilder()
@@ -129,6 +182,12 @@ public abstract class BaseKafkaTestCase {
         log.info("Message {}: build={}ms, send={}ms", index, buildTime, sendTime);
     }
 
+    /**
+     * Deletes and recreates the Kafka topic to ensure a clean state for the test.
+     *
+     * @param admin The {@link AdminClient} to use for topic management.
+     * @throws Exception if topic deletion or creation fails.
+     */
     private void cleanupAndCreateTopic(AdminClient admin) throws Exception {
         var topics = admin.listTopics().names().get(10, TimeUnit.SECONDS);
         if(topics.contains(topicName)) {
@@ -140,12 +199,10 @@ public abstract class BaseKafkaTestCase {
     }
 
     /**
-     * Creates a Kafka consumer with the specified isolation level.
+     * Creates a Kafka consumer with a specific isolation level.
      *
-     * @param isolationLevel The isolation level for the consumer (e.g., "read_committed", "read_uncommitted").
-     *                       If null or blank, no specific isolation level is set.
+     * @param isolationLevel The transaction isolation level (e.g., "read_committed").
      * @return A new {@link Consumer} instance.
-     * It is the caller's responsibility to close this consumer when it is no longer needed.
      */
     protected Consumer<String, WeatherPacket> createConsumer(String isolationLevel) throws InterruptedException {
         Map<String, Object> consumerProps = new HashMap<>();
@@ -165,10 +222,22 @@ public abstract class BaseKafkaTestCase {
         return new DefaultKafkaConsumerFactory<String, WeatherPacket>(consumerProps).createConsumer();
     }
 
+    /**
+     * Provides security-related properties for Kafka clients.
+     * <p>
+     * Subclasses can override this method to provide authentication and authorization properties,
+     * such as SASL configuration. By default, it returns an empty map, indicating no security.
+     * </p>
+     *
+     * @return A map of security properties for Kafka clients.
+     */
     protected Map<String, Object> getSecurityProps() {
         return Collections.emptyMap();
     }
 
+    /**
+     * Closes the Kafka consumer after each test to release resources.
+     */
     @AfterEach
     void tearDown() {
         if(consumer!=null) {

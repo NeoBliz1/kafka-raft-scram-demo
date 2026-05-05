@@ -33,8 +33,12 @@ import java.util.Map;
 
 /**
  * Integration tests for the {@link WeatherIngestionController}.
- * This class uses an embedded Kafka broker to test the end-to-end
- * flow of ingesting weather data and sending it to Kafka.
+ * <p>
+ * This test class uses an embedded Kafka broker provided by {@code spring-kafka-test}
+ * to validate the end-to-end flow of ingesting weather data via the controller
+ * and ensuring it is correctly produced to a Kafka topic. The test uses a mock
+ * schema registry to avoid the need for a real one.
+ * </p>
  */
 @AutoConfigureMockMvc
 @ActiveProfiles({ "test-transactions-off", "test" })
@@ -62,6 +66,11 @@ class WeatherIngestionControllerTest {
     private static final String TOPIC_NAME = "testTopic";
     private Consumer<String, WeatherPacket> consumer;
 
+    /**
+     * Sets up the Kafka consumer before each test.
+     * The consumer is configured to deserialize Protobuf messages and is subscribed
+     * to the embedded Kafka topic.
+     */
     @BeforeEach
     void setUp() {
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps("test-group", "true", embeddedKafka);
@@ -80,6 +89,12 @@ class WeatherIngestionControllerTest {
         consumer.close();
     }
 
+    /**
+     * Tests that the controller successfully ingests a weather data packet
+     * and sends it to the Kafka topic.
+     *
+     * @throws Exception if the mockMvc performance or Kafka consumption fails.
+     */
     @Test
     void shouldIngestWeatherDataAndSendToKafka() throws Exception {
         // 1. Create sensor data

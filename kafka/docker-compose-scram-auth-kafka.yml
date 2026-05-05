@@ -1,7 +1,29 @@
 services:
   kafka:
     image: confluentinc/cp-kafka:8.2.0
-    hostname: kafka
+    command:
+      - bash
+      - -c
+      - |
+        cat <<EOF > /tmp/kraft.properties
+        process.roles=broker,controller
+        node.id=1
+        controller.quorum.voters=1@kafka:19093
+        controller.listener.names=CONTROLLER
+        listeners=PLAINTEXT://:9092,CONTROLLER://:19093
+        advertised.listeners=PLAINTEXT://localhost:9092
+        log.dirs=/var/lib/kafka/data
+        EOF
+
+        echo "Formatting storage with SCRAM users from host environment..."
+        # Docker replaces these with your exported .profile variables
+        kafka-storage format --ignore-formatted \
+          --cluster-id "$${CLUSTER_ID}" \
+          --config /tmp/kraft.properties \
+          --add-scram "SCRAM-SHA-512=[name=${KAFKA_ADMIN},password=${KAFKA_ADMIN_PASSWORD}]" \
+          --add-scram "SCRAM-SHA-512=[name=${KAFKA_USER},password=${KAFKA_PASSWORD}]"
+        
+        exec /etc/confluent/docker/run
     ports:
       - "9092:9092"
     networks:
@@ -21,8 +43,8 @@ services:
       KAFKA_OPTS: "-Djava.security.auth.login.config=/run/secrets/kafka_server_jaas"
 
       # SASL/PLAIN (Basic Auth) Configuration
-      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
-      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
 
       # KRaft Settings
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
@@ -48,15 +70,15 @@ services:
       SCHEMA_REGISTRY_LISTENERS: "http://0.0.0.0:8081"
       # Security for Schema Registry
       SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL: SASL_PLAINTEXT
-      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: PLAIN
+      SCHEMA_REGISTRY_KAFKASTORE_SASL_MECHANISM: SCRAM-SHA-512
       KAFKA_OPTS: "-Djava.security.auth.login.config=/run/secrets/schema_registry_jaas"
       SCHEMA_REGISTRY_OPTS: "-Djava.security.auth.login.config=/run/secrets/schema_registry_jaas"
 
 secrets:
   kafka_server_jaas:
-    file: secrets/basic/kafka_server_jaas.conf
+    file: secrets/scram/kafka_server_jaas.conf
   schema_registry_jaas:
-    file: secrets/basic/schema_registry_jaas.conf
+    file: secrets/scram/schema_registry_jaas.conf
 
 networks:
   eco-net:

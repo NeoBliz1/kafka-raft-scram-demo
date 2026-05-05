@@ -29,38 +29,42 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Integration test for weather data ingestion using a Kafka cluster with SASL/PLAIN (basic) authentication.
+ * Integration test for weather data ingestion using a Kafka cluster with SCRAM-SHA-512 authentication.
  * <p>
- * This test uses Testcontainers and Docker Compose to set up a complete Kafka environment,
- * including a broker and Schema Registry, configured with SASL/PLAIN security. It verifies
- * that the application can successfully produce and consume messages in this secured setup.
+ * This test leverages Testcontainers and Docker Compose to spin up a complete Kafka environment,
+ * including a broker and Schema Registry, configured with SCRAM-SHA-512 for secure communication.
+ * It validates that the application can correctly produce and consume messages in this
+ * authenticated and encrypted setup.
  * </p>
  */
 @Slf4j
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test-basic-auth")
-class WeatherIngestionControllerTestContainerWithBasicAuthTest extends BaseKafkaTestCase {
+@ActiveProfiles("test-scram-auth")
+class WeatherIngestionControllerTestContainerWithScramAuthTest extends BaseKafkaTestCase {
 
     protected static String BOOTSTRAP_SERVERS_URL;
     protected static String REGISTRY_URL;
 
     /**
      * The Docker Compose container environment for the Kafka cluster.
-     * This sets up Kafka and Schema Registry with SASL/PLAIN authentication.
+     * This sets up Kafka and Schema Registry with SCRAM-SHA-512 authentication.
      */
     @Container
-    static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-basic-auth-kafka.yml"))
+    static ComposeContainer ENVIRONMENT = new ComposeContainer(new File("kafka/docker-compose-scram-auth-kafka.yml"))
+            .withEnv("KAFKA_ADMIN", "admin")
+            .withEnv("KAFKA_ADMIN_PASSWORD", "admin-password")
             .withEnv("KAFKA_USER", "client")
             .withEnv("KAFKA_PASSWORD", "client-secret")
-            .withExposedService(KAFKA, KAFKA_PORT)
-            .withExposedService(SCHEMA_REGISTRY, SCHEMA_REGISTRY_PORT, Wait.forHttp("/subjects")
-                    .forPort(SCHEMA_REGISTRY_PORT)
-                    .forStatusCode(200))
-            .withLogConsumer(KAFKA, new Slf4jLogConsumer(log).withPrefix("[KAFKA]"))
-            .withLogConsumer(SCHEMA_REGISTRY, new Slf4jLogConsumer(log).withPrefix("[REGISTRY]"))
-            .withLogConsumer("kafka-setup", new Slf4jLogConsumer(log).withPrefix("[SETUP]"));
+            .withExposedService("kafka", 9092)
+            .withExposedService("schema-registry", 8081, Wait.forHttp("/subjects")
+                    .forPort(8081)
+                    .forStatusCode(200)
+                    .withStartupTimeout(Duration.ofMinutes(2)))
+            .withLogConsumer("kafka", new Slf4jLogConsumer(log).withPrefix("[KAFKA]"))
+            .withLogConsumer("schema-registry", new Slf4jLogConsumer(log).withPrefix("[REGISTRY]"));
+
     @Autowired
     private KafkaProperties kafkaProperties;
 
@@ -71,9 +75,10 @@ class WeatherIngestionControllerTestContainerWithBasicAuthTest extends BaseKafka
      */
     @DynamicPropertySource
     static void overrideProperties(DynamicPropertyRegistry registry) {
-        BOOTSTRAP_SERVERS_URL = ENVIRONMENT.getServiceHost(KAFKA, KAFKA_PORT)+":"+ENVIRONMENT.getServicePort(KAFKA, KAFKA_PORT);
-        REGISTRY_URL = "http://"+ENVIRONMENT.getServiceHost(SCHEMA_REGISTRY, SCHEMA_REGISTRY_PORT)
-                +":"+ENVIRONMENT.getServicePort(SCHEMA_REGISTRY, SCHEMA_REGISTRY_PORT);
+        BOOTSTRAP_SERVERS_URL = ENVIRONMENT.getServiceHost("kafka", 9092)
+                +":"+ENVIRONMENT.getServicePort("kafka", 9092);
+        REGISTRY_URL = "http://"+ENVIRONMENT.getServiceHost("schema-registry", 8081)
+                +":"+ENVIRONMENT.getServicePort("schema-registry", 8081);
 
         registry.add("spring.kafka.bootstrap-servers", () -> BOOTSTRAP_SERVERS_URL);
         registry.add("spring.kafka.producer.properties.schema.registry.url", () -> REGISTRY_URL);
@@ -96,7 +101,7 @@ class WeatherIngestionControllerTestContainerWithBasicAuthTest extends BaseKafka
     }
 
     /**
-     * Provides the SASL/PLAIN security properties for the Kafka client.
+     * Provides the SCRAM-SHA-512 security properties for the Kafka client.
      * These properties are derived from the Spring Kafka configuration.
      *
      * @return A map of security properties.
@@ -113,24 +118,25 @@ class WeatherIngestionControllerTestContainerWithBasicAuthTest extends BaseKafka
 
     /**
      * Tests the end-to-end flow of ingesting a weather data packet and verifying
-     * its consumption from the Kafka topic in a SASL/PLAIN secured environment.
+     * its consumption from the Kafka topic in a SCRAM-SHA-512 secured environment.
      *
      * @throws Exception if the test fails.
      */
     @Test
-    void shouldIngestAndProduceWeatherData() throws Exception {
+    void shouldIngestAndProduceWeatherDataWithScram() throws Exception {
         String batchId = UUID.randomUUID().toString();
 
         sendWeatherPacket(batchId, Instant.now().toEpochMilli());
 
-        await().atMost(15, SECONDS)
-                .pollInterval(Duration.ofMillis(200))
+        await().atMost(20, SECONDS)
+                .pollInterval(Duration.ofMillis(500))
                 .untilAsserted(() -> {
-                    ConsumerRecords<String, WeatherPacket> records = consumer.poll(Duration.ofMillis(100));
-                    assertThat(records).withFailMessage("No records received from Kafka").isNotEmpty();
+                    ConsumerRecords<String, WeatherPacket> records = consumer.poll(Duration.ofMillis(200));
+                    assertThat(records).withFailMessage("No records received. Check Kafka logs for Auth errors.").isNotEmpty();
 
                     WeatherPacket consumedPacket = records.iterator().next().value();
                     assertThat(consumedPacket.getStationId()).isEqualTo(getStationId(batchId));
+                    log.info("Successfully consumed packet with stationId: {}", consumedPacket.getStationId());
                 });
     }
 }
